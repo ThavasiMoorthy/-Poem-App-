@@ -44,31 +44,29 @@ async def poem_streamer(prompt: str):
     Helper to stream processed poem tokens.
     """
     last_text = ""
-    stop_tags = ["<குறிச்சொற்கள்>", "<முடிவு>", "<துவக்கம்>", "<வழிமுறை>", "</வழிமுறை>", "<பொருள்>", "<கருப்பொருள்>", "<பாணி>"]
     
     for full_text in poem_engine.generate_stream(prompt):
-        # Determine if any stop tag has appeared in the full generated text
+        # Strict Truncation: In our model, all meta-tags start with '<'
+        # (e.g., <குறிச்சொற்கள்>, <முடிவு>). We should never show anything from '<' onwards.
         should_stop = False
         display_text = full_text
         
-        for tag in ["<குறிச்சொற்கள்>", "<முடிவு>"]:
-            if tag in display_text:
-                display_text = display_text.split(tag)[0]
-                should_stop = True
+        if "<" in display_text:
+            display_text = display_text.split("<")[0]
+            should_stop = True
         
+        # Clean up any trailing whitespace that might precede a tag
+        display_text = display_text.rstrip()
+            
         # Calculate delta from the cleaned version
         if display_text.startswith(last_text):
             delta = display_text[len(last_text):]
             if delta:
-                # Remove any other intermediate tags (unlikely but safe)
-                for tag in stop_tags:
-                    delta = delta.replace(tag, "")
-                
-                if delta:
-                    yield f"data: {json.dumps({'text': delta})}\n\n"
+                yield f"data: {json.dumps({'text': delta})}\n\n"
             last_text = display_text
             
         if should_stop:
+            logger.info("Stop tag detected (starting with '<'). Terminating stream.")
             break
         
         await asyncio.sleep(0.01)
