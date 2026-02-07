@@ -44,21 +44,33 @@ async def poem_streamer(prompt: str):
     Helper to stream processed poem tokens.
     """
     last_text = ""
+    stop_tags = ["<குறிச்சொற்கள்>", "<முடிவு>", "<துவக்கம்>", "<வழிமுறை>", "</வழிமுறை>", "<பொருள்>", "<கருப்பொருள்>", "<பாணி>"]
+    
     for full_text in poem_engine.generate_stream(prompt):
-        # We only want to yield the new part of the text
-        if full_text.startswith(last_text):
-            delta = full_text[len(last_text):]
-            last_text = full_text
-            
-            # Simple cleaning for common tags in the stream
-            clean_delta = delta.replace("<துவக்கம்>", "").replace("<வழிமுறை>", "").replace("</வழிமுறை>", "")
-            clean_delta = clean_delta.replace("<பொருள்>", "").replace("<கருப்பொருள்>", "").replace("<பாணி>", "")
-            clean_delta = clean_delta.replace("புதுக்கவிதை", "").replace("<குறிச்சொற்கள்>", "").replace("<முடிவு>", "")
-            
-            if clean_delta.strip() or delta.strip():
-                yield f"data: {json.dumps({'text': clean_delta})}\n\n"
+        # Determine if any stop tag has appeared in the full generated text
+        should_stop = False
+        display_text = full_text
         
-        # Artificial small delay to make it feel more natural and avoid overwhelming the connection
+        for tag in ["<குறிச்சொற்கள்>", "<முடிவு>"]:
+            if tag in display_text:
+                display_text = display_text.split(tag)[0]
+                should_stop = True
+        
+        # Calculate delta from the cleaned version
+        if display_text.startswith(last_text):
+            delta = display_text[len(last_text):]
+            if delta:
+                # Remove any other intermediate tags (unlikely but safe)
+                for tag in stop_tags:
+                    delta = delta.replace(tag, "")
+                
+                if delta:
+                    yield f"data: {json.dumps({'text': delta})}\n\n"
+            last_text = display_text
+            
+        if should_stop:
+            break
+        
         await asyncio.sleep(0.01)
     
     yield "data: [DONE]\n\n"
