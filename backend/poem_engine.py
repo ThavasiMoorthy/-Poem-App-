@@ -130,7 +130,9 @@ class PoemEngine:
         # Note: If model_path is a directory, torch.load might fail depending on how it was saved.
         # We assume it's a file or a valid directory-style checkpoint.
         try:
-            ckpt = torch.load(model_path, map_location=self.device)
+            # PyTorch 2.6+ defaults to weights_only=True which doesn't support custom classes.
+            # Setting it to False to allow loading the custom GPT architecture.
+            ckpt = torch.load(model_path, map_location=self.device, weights_only=False)
             if "model_state_dict" in ckpt:
                 self.model.load_state_dict(ckpt["model_state_dict"])
             else:
