@@ -143,12 +143,17 @@ class PoemEngine:
         try:
             # PyTorch 2.6+ defaults to weights_only=True which doesn't support custom classes.
             # Setting it to False to allow loading the custom GPT architecture.
+            import gc
             ckpt = torch.load(model_path, map_location=self.device, weights_only=False)
             if "model_state_dict" in ckpt:
                 self.model.load_state_dict(ckpt["model_state_dict"])
             else:
                 self.model.load_state_dict(ckpt)
-            print("Model weights loaded.")
+            
+            # Clear checkpoint from memory immediately
+            del ckpt
+            gc.collect()
+            print("Model weights loaded and memory cleared.")
         except Exception as e:
             print(f"Error loading model: {e}")
             raise e
