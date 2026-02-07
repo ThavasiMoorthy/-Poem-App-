@@ -201,21 +201,52 @@
                 setInput('');
                 setLoading(true);
 
+                // Create a temporary bot message object
+                const botMessageId = Date.now() + 1;
+                setMessages(prev => [...prev, { id: botMessageId, text: '', sender: 'bot' }]);
+
                 try {
-                    const res = await fetch('/api/chat', {
+                    const response = await fetch('/api/chat', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ message: txt })
                     });
-                    const data = await res.json();
 
-                    setMessages(prev => [...prev, {
-                        id: Date.now() + 1,
-                        text: data.response || "மன்னிக்கவும், கவிதை உருவாக்குவதில் சிக்கல் ஏற்பட்டது.",
-                        sender: 'bot'
-                    }]);
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let fullBotText = "";
+
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+
+                        const chunk = decoder.decode(value);
+                        const lines = chunk.split('\n');
+
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                const data = line.slice(6);
+                                if (data === '[DONE]') break;
+
+                                try {
+                                    const parsed = JSON.parse(data);
+                                    fullBotText += parsed.text;
+
+                                    // Update the specific bot message
+                                    setMessages(prev => prev.map(m =>
+                                        m.id === botMessageId ? { ...m, text: fullBotText } : m
+                                    ));
+                                } catch (err) {
+                                    console.error("Parse error", err);
+                                }
+                            }
+                        }
+                    }
                 } catch (e) {
-                    setMessages(prev => [...prev, { id: Date.now() + 1, text: "இணைப்புத் தோல்வி. மீண்டும் முயற்சிக்கவும்.", sender: 'bot' }]);
+                    console.error("Connection error", e);
+                    setMessages(prev => prev.map(m =>
+                        m.id === botMessageId ? { ...m, text: "இணைப்புத் தோல்வி. மீண்டும் முயற்சிக்கவும்." } : m
+                    ));
                 } finally {
                     setLoading(false);
                 }

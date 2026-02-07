@@ -156,8 +156,17 @@ class PoemEngine:
         self.model.to(self.device)
         self.model.eval()
 
+        # --- Performance Optimization ---
+        # Apply dynamic quantization for faster CPU inference
+        if self.device.type == "cpu":
+            print("Applying dynamic quantization for CPU optimization...")
+            self.model = torch.quantization.quantize_dynamic(
+                self.model, {torch.nn.Linear}, dtype=torch.qint8
+            )
+            print("Quantization complete.")
+
     @torch.no_grad()
-    def generate(self, prompt, max_new_tokens=150, temperature=0.75, top_k=30):
+    def generate(self, prompt, max_new_tokens=100, temperature=0.75, top_k=30):
         ids = self.sp.encode(prompt, out_type=int)
         x = torch.tensor(ids, dtype=torch.long).unsqueeze(0).to(self.device)
 
@@ -180,6 +189,40 @@ class PoemEngine:
                 break
 
         return decoded
+
+    @torch.no_grad()
+    def generate_stream(self, prompt, max_new_tokens=100, temperature=0.75, top_k=30):
+        ids = self.sp.encode(prompt, out_type=int)
+        x = torch.tensor(ids, dtype=torch.long).unsqueeze(0).to(self.device)
+        
+        generated_ids = []
+        
+        for _ in range(max_new_tokens):
+            x_cond = x[:, -self.max_len:]
+            logits = self.model(x_cond)
+            logits = logits[:, -1, :] / temperature
+
+            if top_k is not None:
+                v, _ = torch.topk(logits, top_k)
+                logits[logits < v[:, [-1]]] = -float("inf")
+
+            probs = torch.softmax(logits, dim=-1)
+            next_id = torch.multinomial(probs, num_samples=1)
+
+            x = torch.cat((x, next_id), dim=1)
+            generated_ids.append(next_id.item())
+            
+            # Decode the newly generated token
+            # Note: sentencepiece decoding might be tricky for partial sequences with subwords,
+            # but for simple display, we can decode the whole sequence and take the diff or just decode the token.
+            token_text = self.sp.decode(generated_ids)
+            
+            # Since decoded text accumulates, we yield the delta if possible or just the full string
+            # For simplicity in this engine, we'll yield the whole string so far to the wrapper
+            yield token_text
+            
+            if "<முடிவு>" in token_text:
+                break
 
 if __name__ == "__main__":
     # Test loading

@@ -31,9 +31,37 @@ except Exception as e:
 class ChatRequest(BaseModel):
     message: str # We'll use this as the subject/prompt
 
+import json
+import asyncio
+from fastapi.responses import StreamingResponse
+
 @app.get("/")
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
+async def poem_streamer(prompt: str):
+    """
+    Helper to stream processed poem tokens.
+    """
+    last_text = ""
+    for full_text in poem_engine.generate_stream(prompt):
+        # We only want to yield the new part of the text
+        if full_text.startswith(last_text):
+            delta = full_text[len(last_text):]
+            last_text = full_text
+            
+            # Simple cleaning for common tags in the stream
+            clean_delta = delta.replace("<துவக்கம்>", "").replace("<வழிமுறை>", "").replace("</வழிமுறை>", "")
+            clean_delta = clean_delta.replace("<பொருள்>", "").replace("<கருப்பொருள்>", "").replace("<பாணி>", "")
+            clean_delta = clean_delta.replace("புதுக்கவிதை", "").replace("<குறிச்சொற்கள்>", "").replace("<முடிவு>", "")
+            
+            if clean_delta.strip() or delta.strip():
+                yield f"data: {json.dumps({'text': clean_delta})}\n\n"
+        
+        # Artificial small delay to make it feel more natural and avoid overwhelming the connection
+        await asyncio.sleep(0.01)
+    
+    yield "data: [DONE]\n\n"
 
 @app.post("/api/chat")
 async def chat_endpoint(data: ChatRequest):
@@ -42,37 +70,13 @@ async def chat_endpoint(data: ChatRequest):
     
     try:
         subject = data.message.strip()
-        # Default theme set to 'மகிழ்ச்சி' (Happiness) as requested
         theme = "மகிழ்ச்சி"
-        
-        # Construct the specialized prompt
         prompt = f"<துவக்கம்>\n<வழிமுறை>\nகீழ்க்கண்ட தகவல்களை அடிப்படையாகக் கொண்டு\nஒரு புதுக்கவிதையை எழுதவும்.\n</வழிமுறை>\n\n<பொருள்> {subject}\n<கருப்பொருள்> {theme}\n<பாணி> புதுக்கவிதை\n"
         
-        logger.info(f"Generating poem for subject: {subject} with theme: {theme}")
-        full_output = poem_engine.generate(prompt)
-        
-        # --- Filtering Logic ---
-        # We only want the poem text that comes after "<பாணி> புதுக்கவிதை"
-        # and ends before "<குறிச்சொற்கள்>" or "<முடிவு>"
-        
-        response_text = full_output
-        
-        if "<பாணி> புதுக்கவிதை" in response_text:
-            response_text = response_text.split("<பாணி> புதுக்கவிதை")[-1].strip()
-        
-        if "<குறிச்சொற்கள்>" in response_text:
-            response_text = response_text.split("<குறிச்சொற்கள்>")[0].strip()
-            
-        if "<முடிவு>" in response_text:
-            response_text = response_text.split("<முடிவு>")[0].strip()
-            
-        # Clean up any remaining leading/trailing whitespace or extra tags
-        response_text = response_text.strip()
-            
-        logger.info(f"Generated filtered response: {response_text[:100]}...")
-        return {"response": response_text, "source": "ai"}
+        logger.info(f"Starting stream for subject: {subject}")
+        return StreamingResponse(poem_streamer(prompt), media_type="text/event-stream")
     except Exception as e:
-        logger.error(f"Generation error: {e}")
+        logger.error(f"Streaming error: {e}")
         return {"response": f"Error: {str(e)}", "source": "error"}
 
 if __name__ == "__main__":
