@@ -127,8 +127,19 @@ class PoemEngine:
 
         # Load Checkpoint
         print(f"Loading checkpoint from: {model_path}")
-        # Note: If model_path is a directory, torch.load might fail depending on how it was saved.
-        # We assume it's a file or a valid directory-style checkpoint.
+        
+        # --- LFS Workaround: Reassemble split parts if necessary ---
+        # If the file is very small (< 1KB), it's likely a Git LFS pointer.
+        if os.path.exists(model_path) and os.path.getsize(model_path) < 1024:
+            part1 = model_path + ".part1"
+            part2 = model_path + ".part2"
+            if os.path.exists(part1) and os.path.exists(part2):
+                print("LFS pointer detected. Reassembling model from parts...")
+                with open(model_path, 'wb') as f_out:
+                    with open(part1, 'rb') as f1: f_out.write(f1.read())
+                    with open(part2, 'rb') as f2: f_out.write(f2.read())
+                print("Model reassembled successfully.")
+
         try:
             # PyTorch 2.6+ defaults to weights_only=True which doesn't support custom classes.
             # Setting it to False to allow loading the custom GPT architecture.
